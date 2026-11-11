@@ -11,7 +11,7 @@
 - **자동 업데이트**: 앱을 열 때 GitHub 최신 릴리스를 확인해 설치 화면까지 열어줌.
 
 ## 빌드
-`main`에 푸시하면 GitHub Actions가 서명된 APK를 빌드해 Releases에 `v{빌드번호}`로 올립니다.
+`release-...` 태그를 올리거나 Actions에서 수동 실행하면 GitHub Actions가 서명된 APK를 빌드해 Releases에 `v{빌드번호}`로 올립니다.
 
 저장소 Settings → Secrets and variables → Actions에 아래 4개가 필요합니다.
 
