@@ -135,8 +135,16 @@ class MainActivity : Activity() {
                 background = rounded(Color.parseColor(bg), dp(10).toFloat())
                 setPadding(dp(2), dp(4), dp(2), dp(4))
                 setOnClickListener {
-                    db.setMissing(ds, s.id, d?.missing != true)
-                    render()
+                    if (d?.missing == true) {
+                        AlertDialog.Builder(this@MainActivity)
+                            .setMessage("${s.num}번 ${s.name} 학생을 '조회 때 없음'에서 취소할까요?")
+                            .setPositiveButton("취소하기") { _, _ -> db.setMissing(ds, s.id, false); render() }
+                            .setNegativeButton("그대로 두기", null)
+                            .show()
+                    } else {
+                        db.setMissing(ds, s.id, true)
+                        render()
+                    }
                 }
                 setOnLongClickListener {
                     recordDialog(s, ds, d?.missing == true)
