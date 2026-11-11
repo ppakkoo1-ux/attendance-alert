@@ -184,6 +184,15 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "attendance.d
         if (category == "지각") setArrived(date, sid, true)
     }
 
+    fun updateRecord(id: Long, date: String, sid: Long, category: String, reason: String, memo: String, periods: String) {
+        writableDatabase.update(
+            "records",
+            cv("category" to category, "reason" to reason, "memo" to memo, "periods" to periods),
+            "id=?", arrayOf(id.toString())
+        )
+        if (category == "지각") setArrived(date, sid, true)
+    }
+
     fun setDocSubmitted(id: Long, submitted: Boolean) {
         writableDatabase.update("records", cv("doc_submitted" to submitted), "id=?", arrayOf(id.toString()))
     }

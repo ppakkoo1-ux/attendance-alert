@@ -151,7 +151,7 @@ class MainActivity : Activity() {
                     }
                 }
                 setOnLongClickListener {
-                    recordDialog(s, ds, d?.missing == true)
+                    openRecord(s, ds, d?.missing == true)
                     true
                 }
             }
@@ -189,7 +189,7 @@ class MainActivity : Activity() {
                     }
                 }
                 val info = label(absentRecs.joinToString(", ") { it.label }, 14f, color = "#6A4C93")
-                root.addView(hrow(weighted(cb), info, btn("사유") { recordDialog(s, ds, true) }))
+                root.addView(hrow(weighted(cb), info, btn("사유") { openRecord(s, ds, true) }))
             }
             val times = Prefs.checkTimes(this).joinToString(", ") { Att.fmtTime(it) }
             root.addView(
@@ -245,7 +245,28 @@ class MainActivity : Activity() {
         ).show()
     }
 
-    private fun recordDialog(s: Student, ds: String, wasMissing: Boolean) {
+    /** 길게 누르기/사유: 기록이 없으면 새로 입력, 1건이면 수정, 여러 건이면 고르기 */
+    private fun openRecord(s: Student, ds: String, wasMissing: Boolean) {
+        val existing = db.records(ds).filter { it.studentId == s.id }
+        when (existing.size) {
+            0 -> recordDialog(s, ds, wasMissing, null)
+            1 -> recordDialog(s, ds, wasMissing, existing[0])
+            else -> {
+                val items = existing.map { r ->
+                    "수정: ${r.label}" + if (r.periods.isNotBlank() && r.category != "결석") " (${r.periods})" else ""
+                } + "새 기록 추가"
+                AlertDialog.Builder(this)
+                    .setTitle("${s.num}번 ${s.name}")
+                    .setItems(items.toTypedArray()) { _, which ->
+                        recordDialog(s, ds, wasMissing, existing.getOrNull(which))
+                    }
+                    .setNegativeButton("닫기", null)
+                    .show()
+            }
+        }
+    }
+
+    private fun recordDialog(s: Student, ds: String, wasMissing: Boolean, edit: Record?) {
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(8), dp(20), 0)
@@ -255,7 +276,10 @@ class MainActivity : Activity() {
         Att.CATEGORIES.forEachIndexed { i, c ->
             catGroup.addView(RadioButton(this).apply { text = c; id = 100 + i; textSize = 16f })
         }
-        catGroup.check(if (wasMissing) 100 else 102)
+        catGroup.check(
+            if (edit != null) 100 + Att.CATEGORIES.indexOf(edit.category).coerceAtLeast(0)
+            else if (wasMissing) 100 else 102
+        )
         box.addView(catGroup)
 
         box.addView(label("종류", 14f, true).apply { setPadding(0, dp(10), 0, 0) })
@@ -264,9 +288,22 @@ class MainActivity : Activity() {
             reasonGroup.addView(RadioButton(this).apply { text = r; id = 200 + i; textSize = 16f })
         }
         box.addView(reasonGroup)
+        if (edit != null) {
+            val ri = Att.REASONS.indexOf(edit.reason)
+            if (ri >= 0) reasonGroup.check(200 + ri)
+        }
 
         // ---------- 교시 ----------
         var n = Prefs.periodsOn(this, LocalDate.parse(ds))
+        // 수정일 때 저장된 결시교시에서 처음 선택값을 되살림
+        val saved = edit?.let { Att.parsePeriods(it.periods) }.orEmpty()
+        val savedNums = saved.filter { it in 1 until Att.END }
+        if (edit != null && (edit.category == "결석" || edit.category == "조퇴") && savedNums.isNotEmpty()) {
+            n = savedNums.max()
+        }
+        if (savedNums.isNotEmpty()) n = maxOf(n, savedNums.max())
+        var presetFrom: Int? = saved.firstOrNull()
+        var presetTo: Int? = saved.lastOrNull()?.let { if (edit?.category == "결과" && it == saved.first()) -1 else it }
         var fromSp: Spinner? = null
         var toSp: Spinner? = null
 
@@ -300,18 +337,18 @@ class MainActivity : Activity() {
                     label("결시교시: " + Att.periodsText("결석", n, 0, 0), 13f, color = "#666666")
                 )
                 "지각" -> {
-                    val sp = spinner(listOf(Att.HOMEROOM) + (1..n).toList(), 1)
+                    val sp = spinner(listOf(Att.HOMEROOM) + (1..n).toList(), presetTo ?: 1)
                     toSp = sp
                     periodBox.addView(hrow(label("몇 교시까지 빠졌나  ", 15f), weighted(sp)))
                 }
                 "조퇴" -> {
-                    val sp = spinner((1..n).toList() + Att.END, minOf(5, n))
+                    val sp = spinner((1..n).toList() + Att.END, presetFrom ?: minOf(5, n))
                     fromSp = sp
                     periodBox.addView(hrow(label("몇 교시부터 조퇴  ", 15f), weighted(sp)))
                 }
                 "결과" -> {
-                    val a = spinner((1..n).toList(), 1)
-                    val b = spinner(listOf(-1) + (1..n).toList(), -1) { if (it < 0) "그 한 시간만" else Att.periodName(it) }
+                    val a = spinner((1..n).toList(), presetFrom ?: 1)
+                    val b = spinner(listOf(-1) + (1..n).toList(), presetTo ?: -1) { if (it < 0) "그 한 시간만" else Att.periodName(it) }
                     fromSp = a
                     toSp = b
                     periodBox.addView(hrow(label("시작 교시  ", 15f), weighted(a)))
@@ -320,6 +357,8 @@ class MainActivity : Activity() {
             }
         }
         rebuild()
+        presetFrom = null
+        presetTo = null
         catGroup.setOnCheckedChangeListener { _, _ -> rebuild() }
         nSp.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
@@ -337,15 +376,19 @@ class MainActivity : Activity() {
             hint = "사유 (예: 감기, 진학설명회 참석)"
             isSingleLine = true
             gravity = Gravity.START
+            if (edit != null) setText(edit.memo)
         }
         box.addView(memo)
 
-        val dlg = AlertDialog.Builder(this)
-            .setTitle("${s.num}번 ${s.name} 출결 입력")
+        val builder = AlertDialog.Builder(this)
+            .setTitle("${s.num}번 ${s.name} 출결 ${if (edit != null) "수정" else "입력"}")
             .setView(ScrollView(this).apply { addView(box) })
             .setPositiveButton("저장", null)
             .setNegativeButton("취소", null)
-            .create()
+        if (edit != null) {
+            builder.setNeutralButton("새 기록 추가") { _, _ -> recordDialog(s, ds, wasMissing, null) }
+        }
+        val dlg = builder.create()
         dlg.setOnShowListener {
             dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val ci = catGroup.checkedRadioButtonId - 100
@@ -369,10 +412,12 @@ class MainActivity : Activity() {
                         }
                     }
                 }
-                db.addRecord(
-                    ds, s.id, cat, Att.REASONS[ri], memo.text.toString().trim(),
-                    Att.periodsText(cat, n, from, to)
-                )
+                val periodsText = Att.periodsText(cat, n, from, to)
+                if (edit != null) {
+                    db.updateRecord(edit.id, ds, s.id, cat, Att.REASONS[ri], memo.text.toString().trim(), periodsText)
+                } else {
+                    db.addRecord(ds, s.id, cat, Att.REASONS[ri], memo.text.toString().trim(), periodsText)
+                }
                 dlg.dismiss()
                 render()
             }

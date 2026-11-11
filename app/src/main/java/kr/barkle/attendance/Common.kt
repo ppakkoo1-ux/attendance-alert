@@ -34,6 +34,17 @@ object Att {
         else -> "${p}교시"
     }
 
+    /** 결시교시 문자열 → 교시 번호 목록 (조회 0, 종례 99) */
+    fun parsePeriods(text: String): List<Int> = text.split(",").mapNotNull { t ->
+        val w = t.trim()
+        when {
+            w == "조회" -> HOMEROOM
+            w == "종례" -> END
+            w.endsWith("교시") -> w.removeSuffix("교시").toIntOrNull()
+            else -> null
+        }
+    }
+
     /**
      * 결시교시 문자열 (나이스 월별 출결 현황 형식)
      * 결석: 조회~n교시,종례 / 지각: 조회~to / 조퇴: from~n교시,종례 / 결과: from~to
