@@ -20,12 +20,13 @@ data class Record(
     val memo: String,
     val docSubmitted: Boolean,
     val docAlerted: Boolean,
+    val periods: String,
 ) {
     val label get() = Att.label(category, reason)
     val needsDoc get() = Att.needsDoc(category, reason)
 }
 
-class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "attendance.db", null, 1) {
+class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "attendance.db", null, 2) {
 
     companion object {
         @Volatile
@@ -48,12 +49,14 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "attendance.d
             "CREATE TABLE records(id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, " +
                 "student_id INTEGER NOT NULL, category TEXT NOT NULL, reason TEXT NOT NULL, " +
                 "memo TEXT NOT NULL DEFAULT '', doc_submitted INTEGER NOT NULL DEFAULT 0, " +
-                "doc_alerted INTEGER NOT NULL DEFAULT 0)"
+                "doc_alerted INTEGER NOT NULL DEFAULT 0, periods TEXT NOT NULL DEFAULT '')"
         )
         db.execSQL("CREATE INDEX idx_records_date ON records(date)")
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {}
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) db.execSQL("ALTER TABLE records ADD COLUMN periods TEXT NOT NULL DEFAULT ''")
+    }
 
     private fun cv(vararg pairs: Pair<String, Any?>) = ContentValues().apply {
         for ((k, v) in pairs) {
@@ -151,13 +154,13 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "attendance.d
 
     private fun readRecords(where: String, args: Array<String>): List<Record> =
         readableDatabase.rawQuery(
-            "SELECT id, date, student_id, category, reason, memo, doc_submitted, doc_alerted " +
+            "SELECT id, date, student_id, category, reason, memo, doc_submitted, doc_alerted, periods " +
                 "FROM records WHERE $where ORDER BY date, id",
             args
         ).collect {
             Record(
                 it.getLong(0), it.getString(1), it.getLong(2), it.getString(3), it.getString(4),
-                it.getString(5), it.getInt(6) == 1, it.getInt(7) == 1
+                it.getString(5), it.getInt(6) == 1, it.getInt(7) == 1, it.getString(8)
             )
         }
 
@@ -169,12 +172,12 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "attendance.d
     fun pendingDocAlerts(today: String) =
         readRecords("date<? AND doc_alerted=0 AND doc_submitted=0", arrayOf(today)).filter { it.needsDoc }
 
-    fun addRecord(date: String, sid: Long, category: String, reason: String, memo: String) {
+    fun addRecord(date: String, sid: Long, category: String, reason: String, memo: String, periods: String) {
         writableDatabase.insert(
             "records", null,
             cv(
                 "date" to date, "student_id" to sid, "category" to category,
-                "reason" to reason, "memo" to memo
+                "reason" to reason, "memo" to memo, "periods" to periods
             )
         )
         // 지각은 등교한 것이므로 조회 미확인 상태를 출석으로 처리

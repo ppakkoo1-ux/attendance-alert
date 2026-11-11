@@ -12,6 +12,10 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
+import android.view.View
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
+import android.widget.Spinner
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
@@ -204,8 +208,9 @@ class MainActivity : Activity() {
         } else {
             for (r in recs) {
                 val s = smap[r.studentId]
-                val memo = if (r.memo.isNotBlank()) "  (${r.memo})" else ""
-                val t = label("${s?.num ?: "?"}번 ${s?.name ?: "?"}  ${r.label}$memo", 16f)
+                val memo = if (r.memo.isNotBlank()) "  ${r.memo}" else ""
+                val per = if (r.periods.isNotBlank() && r.category != "결석") "\n${r.periods}" else ""
+                val t = label("${s?.num ?: "?"}번 ${s?.name ?: "?"}  ${r.label}$memo$per", 16f)
                 val row = hrow(weighted(t)).apply { setPadding(0, dp(6), 0, dp(6)) }
                 if (r.needsDoc) {
                     row.addView(CheckBox(this).apply {
@@ -245,7 +250,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(8), dp(20), 0)
         }
-        box.addView(label("구분", 14f, true))
+        box.addView(label("출결", 14f, true))
         val catGroup = RadioGroup(this).apply { orientation = RadioGroup.HORIZONTAL }
         Att.CATEGORIES.forEachIndexed { i, c ->
             catGroup.addView(RadioButton(this).apply { text = c; id = 100 + i; textSize = 16f })
@@ -253,15 +258,83 @@ class MainActivity : Activity() {
         catGroup.check(if (wasMissing) 100 else 102)
         box.addView(catGroup)
 
-        box.addView(label("사유", 14f, true).apply { setPadding(0, dp(10), 0, 0) })
+        box.addView(label("종류", 14f, true).apply { setPadding(0, dp(10), 0, 0) })
         val reasonGroup = RadioGroup(this).apply { orientation = RadioGroup.HORIZONTAL }
         Att.REASONS.forEachIndexed { i, r ->
             reasonGroup.addView(RadioButton(this).apply { text = r; id = 200 + i; textSize = 16f })
         }
         box.addView(reasonGroup)
 
+        // ---------- 교시 ----------
+        var n = Prefs.periodsOn(this, LocalDate.parse(ds))
+        var fromSp: Spinner? = null
+        var toSp: Spinner? = null
+
+        fun spinner(opts: List<Int>, sel: Int, name: (Int) -> String = { Att.periodName(it) }) = Spinner(this).apply {
+            adapter = ArrayAdapter(
+                this@MainActivity, android.R.layout.simple_spinner_dropdown_item, opts.map(name)
+            )
+            setSelection(opts.indexOf(sel).coerceAtLeast(0))
+            tag = opts
+        }
+
+        fun value(sp: Spinner?): Int {
+            if (sp == null) return 0
+            val opts = sp.tag as? List<*> ?: return 0
+            return opts[sp.selectedItemPosition] as Int
+        }
+
+        box.addView(label("교시", 14f, true).apply { setPadding(0, dp(10), 0, 0) })
+        val nOpts = (4..9).toList()
+        val nSp = spinner(nOpts, n) { "이날 ${it}교시까지 수업" }
+        box.addView(nSp)
+        val periodBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        box.addView(periodBox)
+
+        fun rebuild() {
+            periodBox.removeAllViews()
+            fromSp = null
+            toSp = null
+            when (Att.CATEGORIES.getOrNull(catGroup.checkedRadioButtonId - 100)) {
+                "결석" -> periodBox.addView(
+                    label("결시교시: " + Att.periodsText("결석", n, 0, 0), 13f, color = "#666666")
+                )
+                "지각" -> {
+                    val sp = spinner(listOf(Att.HOMEROOM) + (1..n).toList(), 1)
+                    toSp = sp
+                    periodBox.addView(hrow(label("몇 교시까지 빠졌나  ", 15f), weighted(sp)))
+                }
+                "조퇴" -> {
+                    val sp = spinner((1..n).toList() + Att.END, minOf(5, n))
+                    fromSp = sp
+                    periodBox.addView(hrow(label("몇 교시부터 조퇴  ", 15f), weighted(sp)))
+                }
+                "결과" -> {
+                    val a = spinner((1..n).toList(), 1)
+                    val b = spinner(listOf(-1) + (1..n).toList(), -1) { if (it < 0) "그 한 시간만" else Att.periodName(it) }
+                    fromSp = a
+                    toSp = b
+                    periodBox.addView(hrow(label("시작 교시  ", 15f), weighted(a)))
+                    periodBox.addView(hrow(label("끝 교시  ", 15f), weighted(b)))
+                }
+            }
+        }
+        rebuild()
+        catGroup.setOnCheckedChangeListener { _, _ -> rebuild() }
+        nSp.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val v = nOpts[position]
+                if (v != n) {
+                    n = v
+                    rebuild()
+                }
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+
         val memo = EditText(this).apply {
-            hint = "메모 (선택)"
+            hint = "사유 (예: 감기, 진학설명회 참석)"
             isSingleLine = true
             gravity = Gravity.START
         }
@@ -269,7 +342,7 @@ class MainActivity : Activity() {
 
         val dlg = AlertDialog.Builder(this)
             .setTitle("${s.num}번 ${s.name} 출결 입력")
-            .setView(box)
+            .setView(ScrollView(this).apply { addView(box) })
             .setPositiveButton("저장", null)
             .setNegativeButton("취소", null)
             .create()
@@ -278,10 +351,28 @@ class MainActivity : Activity() {
                 val ci = catGroup.checkedRadioButtonId - 100
                 val ri = reasonGroup.checkedRadioButtonId - 200
                 if (ci !in Att.CATEGORIES.indices || ri !in Att.REASONS.indices) {
-                    Toast.makeText(this, "구분과 사유를 선택하세요", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "출결과 종류를 선택하세요", Toast.LENGTH_SHORT).show()
                     return@setOnClickListener
                 }
-                db.addRecord(ds, s.id, Att.CATEGORIES[ci], Att.REASONS[ri], memo.text.toString().trim())
+                val cat = Att.CATEGORIES[ci]
+                var from = 0
+                var to = 0
+                when (cat) {
+                    "지각" -> to = value(toSp)
+                    "조퇴" -> from = value(fromSp)
+                    "결과" -> {
+                        from = value(fromSp)
+                        to = value(toSp).let { if (it < 0) from else it }
+                        if (to < from) {
+                            Toast.makeText(this, "끝 교시가 시작 교시보다 앞입니다", Toast.LENGTH_SHORT).show()
+                            return@setOnClickListener
+                        }
+                    }
+                }
+                db.addRecord(
+                    ds, s.id, cat, Att.REASONS[ri], memo.text.toString().trim(),
+                    Att.periodsText(cat, n, from, to)
+                )
                 dlg.dismiss()
                 render()
             }

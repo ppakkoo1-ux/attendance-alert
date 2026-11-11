@@ -31,6 +31,10 @@
             android:windowSoftInputMode="adjustResize" />
 
         <activity
+            android:name=".HolidayActivity"
+            android:label="휴일·방학 지정" />
+
+        <activity
             android:name=".StatsActivity"
             android:label="출결 통계" />
 

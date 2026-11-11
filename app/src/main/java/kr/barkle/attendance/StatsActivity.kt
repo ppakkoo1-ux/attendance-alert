@@ -80,15 +80,18 @@ class StatsActivity : Activity() {
         )
         root.addView(
             hrow(
+                weighted(btn("지난 달") {
+                    val t = LocalDate.now().minusMonths(1); start = t.withDayOfMonth(1); end = t.withDayOfMonth(t.lengthOfMonth()); render()
+                }),
                 weighted(btn("이번 달") {
                     val t = LocalDate.now(); start = t.withDayOfMonth(1); end = t; render()
                 }),
                 weighted(btn("학년도") {
                     val t = LocalDate.now(); start = Att.schoolYearStart(t); end = t; render()
                 }),
-                weighted(btn("PDF 저장") { exportPdf() }),
             )
         )
+        root.addView(btn("월별 출결 현황 PDF 저장") { exportPdf() })
         if (start.isAfter(end)) {
             root.addView(label("시작일이 종료일보다 늦습니다.", 14f, color = "#B00020"))
             return
@@ -123,8 +126,8 @@ class StatsActivity : Activity() {
     private fun exportPdf() {
         if (start.isAfter(end)) return
         try {
-            val (rows, recs) = Stats.compute(db, start, end)
-            val uri = PdfExporter.export(this, start, end, rows, recs, db.studentMap())
+            val recs = db.recordsBetween(start.toString(), end.toString())
+            val uri = PdfExporter.export(this, start, end, recs, db.studentMap())
             Toast.makeText(this, "다운로드/출결알림 폴더에 저장했습니다", Toast.LENGTH_LONG).show()
             try {
                 startActivity(

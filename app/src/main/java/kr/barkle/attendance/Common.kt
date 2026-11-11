@@ -20,7 +20,34 @@ object Att {
     val CATEGORIES = listOf("결석", "지각", "조퇴", "결과")
     val REASONS = listOf("인정", "질병", "미인정", "기타")
 
-    fun label(category: String, reason: String) = reason + category
+    /** 나이스 표기: 인정 → 출석인정결석, 질병결석, 미인정지각 … */
+    fun label(category: String, reason: String) =
+        (if (reason == "인정") "출석인정" else reason) + category
+
+    // ---------- 교시 ----------
+    const val HOMEROOM = 0   // 조회
+    const val END = 99       // 종례
+
+    fun periodName(p: Int) = when (p) {
+        HOMEROOM -> "조회"
+        END -> "종례"
+        else -> "${p}교시"
+    }
+
+    /**
+     * 결시교시 문자열 (나이스 월별 출결 현황 형식)
+     * 결석: 조회~n교시,종례 / 지각: 조회~to / 조퇴: from~n교시,종례 / 결과: from~to
+     */
+    fun periodsText(category: String, n: Int, from: Int, to: Int): String {
+        val list: List<Int> = when (category) {
+            "결석" -> listOf(HOMEROOM) + (1..n).toList() + END
+            "지각" -> (HOMEROOM..to.coerceIn(HOMEROOM, n)).toList()
+            "조퇴" -> if (from == END) listOf(END) else (from..n).toList() + END
+            "결과" -> (from..maxOf(from, to)).toList()
+            else -> emptyList()
+        }
+        return list.joinToString(",") { periodName(it) }
+    }
 
     /** 출결서류가 필요한 기록: 모든 결석, 인정지각, 인정조퇴, 인정결과 */
     fun needsDoc(category: String, reason: String) = when (category) {
@@ -69,12 +96,38 @@ object Prefs {
 
     fun docTime(c: Context): LocalTime = Att.parseTime(docTimeText(c)) ?: LocalTime.of(8, 35)
 
-    fun save(c: Context, checkTimes: String, docTime: String, holidays: String) {
+    const val DEFAULT_PERIODS = "6, 7, 6, 7, 6"
+
+    fun schoolName(c: Context): String = sp(c).getString("school_name", "") ?: ""
+    fun grade(c: Context): String = sp(c).getString("grade", "") ?: ""
+    fun classNo(c: Context): String = sp(c).getString("class_no", "") ?: ""
+    fun periodsText(c: Context): String = sp(c).getString("periods", DEFAULT_PERIODS) ?: DEFAULT_PERIODS
+
+    /** 요일별(월~금) 교시 수 */
+    fun periodsByWeekday(c: Context): List<Int> {
+        val nums = periodsText(c).split(",", " ").mapNotNull { it.trim().toIntOrNull() }.filter { it in 1..10 }
+        return List(5) { nums.getOrElse(it) { 7 } }
+    }
+
+    fun periodsOn(c: Context, d: LocalDate): Int =
+        if (d.dayOfWeek.value <= 5) periodsByWeekday(c)[d.dayOfWeek.value - 1] else 7
+
+    fun save(
+        c: Context, checkTimes: String, docTime: String,
+        schoolName: String, grade: String, classNo: String, periods: String,
+    ) {
         sp(c).edit()
             .putString("check_times", checkTimes)
             .putString("doc_time", docTime)
-            .putString("holidays", holidays)
+            .putString("school_name", schoolName)
+            .putString("grade", grade)
+            .putString("class_no", classNo)
+            .putString("periods", periods)
             .apply()
+    }
+
+    fun setHolidays(c: Context, text: String) {
+        sp(c).edit().putString("holidays", text).apply()
     }
 }
 

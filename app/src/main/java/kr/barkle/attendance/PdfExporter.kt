@@ -11,151 +11,164 @@ import android.os.Environment
 import android.provider.MediaStore
 import java.io.IOException
 import java.time.LocalDate
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
+import java.time.YearMonth
 
-/** 통계 PDF (A4 가로): 1) 학생별 구분·사유 집계표  2) 기록 상세 */
+/**
+ * 나이스 '월별 출결 현황' 형식 PDF (A4 세로)
+ * 일자 | 번호 | 성명 | 출결구분 | 결시교시 | 사유
+ */
 object PdfExporter {
-    private const val W = 842
-    private const val H = 595
-    private const val M = 30f
+    private const val W = 595
+    private const val H = 842
+    private const val ML = 42f
+    private const val MR = 42f
+    private const val TOP = 40f
+    private const val BOTTOM = 70f
+    private const val LINE = 12f
+
+    private fun dot(d: LocalDate) = "%04d.%02d.%02d".format(d.year, d.monthValue, d.dayOfMonth)
+
+    fun periodLabel(start: LocalDate, end: LocalDate): String {
+        val ym = YearMonth.from(start)
+        return if (start.dayOfMonth == 1 && YearMonth.from(end) == ym &&
+            (end == ym.atEndOfMonth() || end == LocalDate.now())
+        ) "%04d.%02d".format(ym.year, ym.monthValue)
+        else "${dot(start)} ~ ${dot(end)}"
+    }
+
+    /** 칸 너비에 맞춰 줄바꿈 (쉼표 뒤에서 우선 끊음) */
+    private fun wrap(text: String, paint: Paint, width: Float): List<String> {
+        if (text.isEmpty()) return listOf("")
+        val lines = mutableListOf<String>()
+        var rest = text
+        while (rest.isNotEmpty()) {
+            if (paint.measureText(rest) <= width) {
+                lines.add(rest)
+                break
+            }
+            var n = paint.breakText(rest, true, width, null).coerceAtLeast(1)
+            val comma = rest.lastIndexOf(',', n - 1)
+            if (comma in 1 until n) n = comma + 1
+            lines.add(rest.substring(0, n))
+            rest = rest.substring(n)
+        }
+        return lines
+    }
 
     fun export(
         c: Context,
         start: LocalDate,
         end: LocalDate,
-        rows: List<Stats.Row>,
         recs: List<Record>,
         smap: Map<Long, Student>,
     ): Uri {
         val doc = PdfDocument()
-        val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 15f; isFakeBoldText = true; color = Color.BLACK }
-        val smallPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 8f; color = Color.DKGRAY }
-        val cellPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 9f; color = Color.BLACK; textAlign = Paint.Align.CENTER }
-        val boldPaint = Paint(cellPaint).apply { isFakeBoldText = true }
-        val leftPaint = Paint(cellPaint).apply { textAlign = Paint.Align.LEFT }
-        val border = Paint().apply { style = Paint.Style.STROKE; strokeWidth = 0.6f; color = Color.GRAY }
-        val headFill = Paint().apply { style = Paint.Style.FILL; color = Color.rgb(235, 240, 237) }
+        val black = Color.BLACK
+        val title = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 17f; isFakeBoldText = true; color = black; textAlign = Paint.Align.CENTER }
+        val small = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 9f; color = black }
+        val cellC = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 8.5f; color = black; textAlign = Paint.Align.CENTER }
+        val cellL = Paint(cellC).apply { textAlign = Paint.Align.LEFT }
+        val border = Paint().apply { style = Paint.Style.STROKE; strokeWidth = 0.6f; color = black }
 
-        val created = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
-        var pageNo = 0
-        var page: PdfDocument.Page? = null
-        lateinit var cv: Canvas
-        var y = 0f
+        val school = Prefs.schoolName(c)
+        val grade = Prefs.grade(c)
+        val classNo = Prefs.classNo(c)
+        val classTitle = listOf(
+            if (grade.isNotBlank()) "${grade}학년" else "",
+            if (classNo.isNotBlank()) "${classNo}반" else "",
+        ).filter { it.isNotEmpty() }.joinToString(" ")
+        val today = dot(LocalDate.now()) + "."
+        val periodText = "기간 :  " + periodLabel(start, end)
 
-        fun newPage(subtitle: String) {
-            page?.let { doc.finishPage(it) }
-            pageNo++
-            val p = doc.startPage(PdfDocument.PageInfo.Builder(W, H, pageNo).create())
-            page = p
-            cv = p.canvas
-            cv.drawText("출결 통계  $start ~ $end", M, M + 12f, titlePaint)
-            val info = "생성 $created · ${pageNo}쪽"
-            cv.drawText(info, W - M - smallPaint.measureText(info), M + 12f, smallPaint)
-            cv.drawText(subtitle, M, M + 30f, boldPaint.apply { textAlign = Paint.Align.LEFT })
-            boldPaint.textAlign = Paint.Align.CENTER
-            y = M + 40f
-        }
+        // 열: 일자, 번호, 성명, 출결구분, 결시교시, 사유
+        val tableW = W - ML - MR
+        val widths = floatArrayOf(78f, 36f, 62f, 70f, 142f, 0f)
+        widths[5] = tableW - widths.take(5).sum()
+        val heads = listOf("일자", "번호", "성명", "출결구분", "결시교시", "사유")
+        val leftCols = setOf(2, 4, 5)
 
-        fun cell(x: Float, w: Float, top: Float, h: Float, s: String, paint: Paint = cellPaint, fill: Boolean = false) {
-            if (fill) cv.drawRect(x, top, x + w, top + h, headFill)
-            cv.drawRect(x, top, x + w, top + h, border)
-            var t = s
-            if (paint.measureText(t) > w - 4) {
-                val n = paint.breakText(t, true, w - 10, null)
-                t = t.take(n) + "…"
+        // 정렬: 일자, 번호
+        val rows = recs.sortedWith(compareBy<Record>({ it.date }, { smap[it.studentId]?.num ?: 0 }))
+            .map { r ->
+                val s = smap[r.studentId]
+                listOf(
+                    dot(LocalDate.parse(r.date)),
+                    s?.num?.toString() ?: "",
+                    s?.name ?: "",
+                    r.label,
+                    r.periods,
+                    r.memo,
+                )
             }
-            val tx = if (paint.textAlign == Paint.Align.CENTER) x + w / 2 else x + 3
-            cv.drawText(t, tx, top + h / 2 + 3.2f, paint)
+
+        // 줄바꿈을 계산해 쪽 나누기
+        data class Laid(val cells: List<List<String>>, val h: Float)
+        val laid = rows.map { row ->
+            val cells = row.mapIndexed { i, v -> wrap(v, cellL, widths[i] - 8f) }
+            val lines = cells.maxOf { it.size }
+            Laid(cells, maxOf(30f, lines * LINE + 14f))
         }
+        val headH = 24f
+        val tableTop = TOP + 78f
+        val avail = H - BOTTOM - tableTop - headH
+        val pages = mutableListOf<MutableList<Laid>>(mutableListOf())
+        var used = 0f
+        for (l in laid) {
+            if (used + l.h > avail && pages.last().isNotEmpty()) {
+                pages.add(mutableListOf())
+                used = 0f
+            }
+            pages.last().add(l)
+            used += l.h
+        }
+        val total = pages.size
 
-        // ---------- 1. 집계표 ----------
-        val numW = 30f
-        val nameW = 72f
-        val colW = 38f
-        val totW = 40f
-        val rowH = 15f
-        val nR = Att.REASONS.size
-
-        fun header() {
-            var x = M
-            cell(x, numW, y, rowH * 2, "번호", boldPaint, true); x += numW
-            cell(x, nameW, y, rowH * 2, "이름", boldPaint, true); x += nameW
-            for (cat in Att.CATEGORIES) {
-                cell(x, colW * nR, y, rowH, cat, boldPaint, true)
-                for ((i, r) in Att.REASONS.withIndex()) {
-                    cell(x + colW * i, colW, y + rowH, rowH, r, boldPaint, true)
+        fun drawRow(cv: Canvas, y: Float, h: Float, cells: List<List<String>>, head: Boolean) {
+            var x = ML
+            for (i in cells.indices) {
+                val w = widths[i]
+                cv.drawRect(x, y, x + w, y + h, border)
+                val lines = cells[i]
+                val left = !head && i in leftCols
+                val p = if (left) cellL else cellC
+                val tx = if (left) x + 4f else x + w / 2
+                val blockH = lines.size * LINE
+                var ty = y + (h - blockH) / 2 + LINE - 3f
+                for (ln in lines) {
+                    cv.drawText(ln, tx, ty, p)
+                    ty += LINE
                 }
-                x += colW * nR
+                x += w
             }
-            cell(x, totW, y, rowH * 2, "합계", boldPaint, true)
-            y += rowH * 2
         }
 
-        fun dataRow(num: String, name: String, counts: IntArray, bold: Boolean) {
-            val p = if (bold) boldPaint else cellPaint
-            var x = M
-            cell(x, numW, y, rowH, num, p, bold); x += numW
-            cell(x, nameW, y, rowH, name, p, bold); x += nameW
-            for (n in counts) {
-                cell(x, colW, y, rowH, if (n == 0) "" else n.toString(), p, bold); x += colW
+        pages.forEachIndexed { pi, list ->
+            val page = doc.startPage(PdfDocument.PageInfo.Builder(W, H, pi + 1).create())
+            val cv = page.canvas
+            cv.drawText(today, W - MR - small.measureText(today), TOP, small)
+            cv.drawText("월별 출결 현황", W / 2f, TOP + 36f, title)
+            cv.drawText("$classTitle 월별 출결 현황".trim(), ML, TOP + 68f, small)
+            cv.drawText(periodText, W - MR - small.measureText(periodText), TOP + 68f, small)
+
+            var y = tableTop
+            drawRow(cv, y, headH, heads.map { listOf(it) }, true)
+            y += headH
+            if (list.isEmpty()) {
+                cv.drawRect(ML, y, ML + tableW, y + 30f, border)
+                cv.drawText("기록 없음", ML + tableW / 2, y + 19f, cellC)
             }
-            cell(x, totW, y, rowH, counts.sum().toString(), p, bold)
-            y += rowH
+            for (l in list) {
+                drawRow(cv, y, l.h, l.cells, false)
+                y += l.h
+            }
+
+            val pageText = "${pi + 1} / $total"
+            cv.drawText(pageText, W / 2f - small.measureText(pageText) / 2, H - 40f, small)
+            if (school.isNotBlank()) cv.drawText(school, W - MR - small.measureText(school), H - 40f, small)
+            doc.finishPage(page)
         }
 
-        newPage("학생별 출결 집계")
-        header()
-        val total = IntArray(Att.CATEGORIES.size * nR)
-        for (r in rows) {
-            if (y + rowH > H - M) { newPage("학생별 출결 집계 (계속)"); header() }
-            val tag = if (r.student.active) "" else "*"
-            dataRow(r.student.num.toString(), r.student.name + tag, r.counts, false)
-            r.counts.forEachIndexed { i, n -> total[i] += n }
-        }
-        if (y + rowH > H - M) { newPage("학생별 출결 집계 (계속)"); header() }
-        dataRow("", "합계", total, true)
-        if (rows.any { !it.student.active }) {
-            y += 12f
-            cv.drawText("* 현재 명단에서 빠진 학생", M, y, smallPaint)
-        }
-
-        // ---------- 2. 기록 상세 ----------
-        val cols = listOf("날짜" to 80f, "번호" to 35f, "이름" to 72f, "구분" to 72f, "서류" to 50f)
-        val memoW = W - 2 * M - cols.sumOf { it.second.toDouble() }.toFloat()
-
-        fun detailHeader() {
-            var x = M
-            for ((t, w) in cols) { cell(x, w, y, rowH, t, boldPaint, true); x += w }
-            cell(x, memoW, y, rowH, "메모", boldPaint, true)
-            y += rowH
-        }
-
-        newPage("출결 기록 상세 (${recs.size}건)")
-        detailHeader()
-        if (recs.isEmpty()) {
-            cell(M, W - 2 * M, y, rowH, "기록 없음")
-            y += rowH
-        }
-        for (r in recs) {
-            if (y + rowH > H - M) { newPage("출결 기록 상세 (계속)"); detailHeader() }
-            val s = smap[r.studentId]
-            val values = listOf(
-                "${r.date.substring(0, 4)}/${Att.short(r.date)}",
-                (s?.num ?: 0).toString(),
-                s?.name ?: "?",
-                r.label,
-                if (!r.needsDoc) "-" else if (r.docSubmitted) "제출" else "미제출",
-            )
-            var x = M
-            values.forEachIndexed { i, v -> cell(x, cols[i].second, y, rowH, v); x += cols[i].second }
-            cell(x, memoW, y, rowH, r.memo, leftPaint)
-            y += rowH
-        }
-
-        page?.let { doc.finishPage(it) }
-
-        val name = "출결통계_${start}_${end}.pdf"
+        val name = "월별출결현황_${periodLabel(start, end).replace(" ", "")}.pdf"
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, name)
             put(MediaStore.MediaColumns.MIME_TYPE, "application/pdf")

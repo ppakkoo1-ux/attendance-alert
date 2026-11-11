@@ -52,31 +52,52 @@ class SettingsActivity : Activity() {
         val docTime = EditText(this).apply { setText(Prefs.docTimeText(this@SettingsActivity)); textSize = 16f }
         root.addView(docTime)
 
+        // 학급 정보 (PDF 머리글)
+        root.addView(section("학급 정보"))
+        root.addView(label("출결 현황 PDF 머리글에 들어갑니다.", 13f, color = "#666666"))
+        fun field(hint: String, value: String, number: Boolean = false) = EditText(this).apply {
+            this.hint = hint
+            setText(value)
+            textSize = 16f
+            if (number) inputType = InputType.TYPE_CLASS_NUMBER
+        }
+        val school = field("학교명 (예: 항동중학교)", Prefs.schoolName(this))
+        val grade = field("학년", Prefs.grade(this), true)
+        val classNo = field("반", Prefs.classNo(this), true)
+        root.addView(school)
+        root.addView(hrow(weighted(grade), label(" 학년   "), weighted(classNo), label(" 반")))
+
+        // 교시 수
+        root.addView(section("요일별 교시 수 (월, 화, 수, 목, 금)"))
+        root.addView(label("결석·조퇴의 결시교시를 만들 때 씁니다. 출결 입력 때 그날만 바꿀 수 있습니다.", 13f, color = "#666666"))
+        val periods = EditText(this).apply { setText(Prefs.periodsText(this@SettingsActivity)); textSize = 16f }
+        root.addView(periods)
+
         // 휴일
         root.addView(section("휴일·방학 (토·일은 자동 제외)"))
-        root.addView(
-            label(
-                "한 줄에 하나: 날짜 또는 기간. 뒤에 메모를 붙여도 됩니다.\n예) 2026-12-25 성탄절\n예) 2026-12-31~2027-03-01 겨울방학",
-                13f, color = "#666666"
-            )
-        )
-        val holidays = multiline(Prefs.holidaysText(this), "2026-12-25 성탄절", 5)
-        root.addView(holidays)
+        root.addView(btn("달력에서 휴일·방학 지정") {
+            startActivity(Intent(this, HolidayActivity::class.java))
+        })
 
         root.addView(btn("저장") {
             val parsed = parseRoster(roster.text.toString())
             val times = checkTimes.text.toString().split(",", " ").mapNotNull { Att.parseTime(it) }
             val doc = Att.parseTime(docTime.text.toString())
+            val pNums = periods.text.toString().split(",", " ").mapNotNull { it.trim().toIntOrNull() }
             when {
                 times.isEmpty() -> toast("출석 확인 시각을 08:50 형식으로 입력하세요")
                 doc == null -> toast("서류 안내 시각을 08:35 형식으로 입력하세요")
+                pNums.size != 5 || pNums.any { it !in 1..10 } -> toast("교시 수를 월~금 5개 숫자로 입력하세요 (예: 6, 7, 6, 7, 6)")
                 else -> {
                     db.saveRoster(parsed)
                     Prefs.save(
                         this,
                         times.distinct().sorted().joinToString(", ") { Att.fmtTime(it) },
                         Att.fmtTime(doc),
-                        holidays.text.toString().trim()
+                        school.text.toString().trim(),
+                        grade.text.toString().trim(),
+                        classNo.text.toString().trim(),
+                        pNums.joinToString(", ")
                     )
                     Alarms.scheduleAll(this)
                     toast("저장했습니다 (학생 ${parsed.size}명)")
