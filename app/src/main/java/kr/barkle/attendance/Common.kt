@@ -22,10 +22,10 @@ object Att {
 
     fun label(category: String, reason: String) = reason + category
 
-    /** 출결서류가 필요한 기록: 모든 결석, 인정지각, 모든 조퇴, 모든 결과 */
+    /** 출결서류가 필요한 기록: 모든 결석, 인정지각, 인정조퇴, 인정결과 */
     fun needsDoc(category: String, reason: String) = when (category) {
-        "결석", "조퇴", "결과" -> true
-        "지각" -> reason == "인정"
+        "결석" -> true
+        "지각", "조퇴", "결과" -> reason == "인정"
         else -> false
     }
 
