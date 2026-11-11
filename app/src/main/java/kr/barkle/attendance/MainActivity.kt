@@ -113,7 +113,7 @@ class MainActivity : Activity() {
         val smap = db.studentMap()
 
         // ---------- 조회 ----------
-        root.addView(section("조회 — 없는 학생을 누르세요"))
+        root.addView(section("조회 — 없는 학생을 누르세요 (다시 누르면 취소)"))
         root.addView(label("길게 누르면 결석·지각·조퇴·결과를 입력합니다", 12f, color = "#666666"))
 
         val grid = GridLayout(this).apply { columnCount = 5 }
