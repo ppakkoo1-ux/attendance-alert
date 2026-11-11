@@ -198,12 +198,14 @@ class MainActivity : Activity() {
                 val s = smap[r.studentId]
                 val memo = if (r.memo.isNotBlank()) "  (${r.memo})" else ""
                 val t = label("${s?.num ?: "?"}번 ${s?.name ?: "?"}  ${r.label}$memo", 16f)
-                val cb = CheckBox(this).apply {
-                    text = "서류 제출"
-                    isChecked = r.docSubmitted
-                    setOnCheckedChangeListener { _, checked -> db.setDocSubmitted(r.id, checked) }
+                val row = hrow(weighted(t)).apply { setPadding(0, dp(6), 0, dp(6)) }
+                if (r.needsDoc) {
+                    row.addView(CheckBox(this).apply {
+                        text = "서류 제출"
+                        isChecked = r.docSubmitted
+                        setOnCheckedChangeListener { _, checked -> db.setDocSubmitted(r.id, checked) }
+                    })
                 }
-                val row = hrow(weighted(t), cb).apply { setPadding(0, dp(6), 0, dp(6)) }
                 val del = {
                     AlertDialog.Builder(this)
                         .setMessage("${s?.name ?: ""} ${r.label} 기록을 삭제할까요?")

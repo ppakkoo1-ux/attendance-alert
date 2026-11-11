@@ -145,7 +145,7 @@ object PdfExporter {
                 (s?.num ?: 0).toString(),
                 s?.name ?: "?",
                 r.label,
-                if (r.docSubmitted) "제출" else "미제출",
+                if (!r.needsDoc) "-" else if (r.docSubmitted) "제출" else "미제출",
             )
             var x = M
             values.forEachIndexed { i, v -> cell(x, cols[i].second, y, rowH, v); x += cols[i].second }

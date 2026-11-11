@@ -22,6 +22,7 @@ data class Record(
     val docAlerted: Boolean,
 ) {
     val label get() = Att.label(category, reason)
+    val needsDoc get() = Att.needsDoc(category, reason)
 }
 
 class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "attendance.db", null, 1) {
@@ -165,7 +166,8 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "attendance.d
     fun recordsBetween(start: String, end: String) = readRecords("date>=? AND date<=?", arrayOf(start, end))
 
     /** 오늘 이전 날짜의 기록 중 서류 안내 알림을 아직 안 보냈고 서류도 미제출인 것 */
-    fun pendingDocAlerts(today: String) = readRecords("date<? AND doc_alerted=0 AND doc_submitted=0", arrayOf(today))
+    fun pendingDocAlerts(today: String) =
+        readRecords("date<? AND doc_alerted=0 AND doc_submitted=0", arrayOf(today)).filter { it.needsDoc }
 
     fun addRecord(date: String, sid: Long, category: String, reason: String, memo: String) {
         writableDatabase.insert(

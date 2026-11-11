@@ -22,6 +22,13 @@ object Att {
 
     fun label(category: String, reason: String) = reason + category
 
+    /** 출결서류가 필요한 기록: 모든 결석, 인정지각, 모든 조퇴, 모든 결과 */
+    fun needsDoc(category: String, reason: String) = when (category) {
+        "결석", "조퇴", "결과" -> true
+        "지각" -> reason == "인정"
+        else -> false
+    }
+
     private fun dow(d: LocalDate) = d.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.KOREAN)
 
     fun pretty(d: LocalDate) = "${d.year}. ${d.monthValue}. ${d.dayOfMonth}. (${dow(d)})"

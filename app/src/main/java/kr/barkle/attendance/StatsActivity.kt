@@ -111,7 +111,7 @@ class StatsActivity : Activity() {
             root.addView(label(Stats.summary(r.counts), 14f))
         }
 
-        val unsubmitted = recs.filter { !it.docSubmitted }
+        val unsubmitted = recs.filter { it.needsDoc && !it.docSubmitted }
         root.addView(section("서류 미제출 (${unsubmitted.size}건)"))
         if (unsubmitted.isEmpty()) root.addView(label("없음", 14f, color = "#666666"))
         for (r in unsubmitted) {
