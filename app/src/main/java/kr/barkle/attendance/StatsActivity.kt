@@ -51,6 +51,7 @@ class StatsActivity : Activity() {
 
     private var start: LocalDate = Att.schoolYearStart(LocalDate.now())
     private var end: LocalDate = LocalDate.now()
+    private var byStudent = false  // 기본: 날짜순
     private lateinit var root: LinearLayout
     private val db by lazy { Db.get(this) }
 
@@ -105,13 +106,32 @@ class StatsActivity : Activity() {
         rows.forEach { r -> r.counts.forEachIndexed { i, n -> total[i] += n } }
         root.addView(label(Stats.summary(total).ifBlank { "기록 없음" }, 15f))
 
-        root.addView(section("학생별"))
-        val withRecs = rows.filter { it.total > 0 }
-        if (withRecs.isEmpty()) root.addView(label("기록 없음", 14f, color = "#666666"))
-        for (r in withRecs) {
-            val tag = if (r.student.active) "" else " (명단 제외)"
-            root.addView(label("${r.student.num}번 ${r.student.name}$tag", 15f, true).apply { setPadding(0, dp(6), 0, 0) })
-            root.addView(label(Stats.summary(r.counts), 14f))
+        root.addView(
+            hrow(
+                weighted(section(if (byStudent) "학생별" else "날짜순")),
+                btn(if (byStudent) "날짜순으로 보기" else "학생별로 보기") { byStudent = !byStudent; render() },
+            )
+        )
+        if (byStudent) {
+            val withRecs = rows.filter { it.total > 0 }
+            if (withRecs.isEmpty()) root.addView(label("기록 없음", 14f, color = "#666666"))
+            for (r in withRecs) {
+                val tag = if (r.student.active) "" else " (명단 제외)"
+                root.addView(label("${r.student.num}번 ${r.student.name}$tag", 15f, true).apply { setPadding(0, dp(6), 0, 0) })
+                root.addView(label(Stats.summary(r.counts), 14f))
+            }
+        } else {
+            if (recs.isEmpty()) root.addView(label("기록 없음", 14f, color = "#666666"))
+            val byDate = recs.sortedWith(compareBy<Record>({ it.date }, { smap[it.studentId]?.num ?: 0 })).groupBy { it.date }
+            for ((date, list) in byDate) {
+                root.addView(label(Att.short(date), 15f, true).apply { setPadding(0, dp(8), 0, 0) })
+                for (r in list) {
+                    val st = smap[r.studentId]
+                    val per = if (r.periods.isNotBlank() && r.category != "결석") " (${r.periods})" else ""
+                    val memo = if (r.memo.isNotBlank()) "  ${r.memo}" else ""
+                    root.addView(label("${st?.num ?: "?"}번 ${st?.name ?: "?"}  ${r.label}$per$memo", 14f))
+                }
+            }
         }
 
         val unsubmitted = recs.filter { it.needsDoc && !it.docSubmitted }
