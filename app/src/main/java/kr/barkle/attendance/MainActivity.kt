@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
@@ -26,6 +27,7 @@ import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.Toast
 import java.time.LocalDate
+import kotlin.math.abs
 
 class MainActivity : Activity() {
 
@@ -65,6 +67,45 @@ class MainActivity : Activity() {
         }
         Alarms.scheduleAll(this)
         Updater.check(this, manual = false)
+    }
+
+    // ---------- 좌우 스와이프로 날짜 이동 ----------
+    private var downX = 0f
+    private var downY = 0f
+    private var swiping = false
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downX = ev.rawX
+                downY = ev.rawY
+                swiping = false
+            }
+            MotionEvent.ACTION_MOVE -> if (!swiping) {
+                val dx = ev.rawX - downX
+                val dy = ev.rawY - downY
+                if (abs(dx) > dp(40) && abs(dx) > abs(dy) * 2) {
+                    // 가로로 크게 밀면 버튼 누름·스크롤을 취소하고 스와이프로 처리
+                    swiping = true
+                    val cancel = MotionEvent.obtain(ev).apply { action = MotionEvent.ACTION_CANCEL }
+                    super.dispatchTouchEvent(cancel)
+                    cancel.recycle()
+                }
+            }
+            MotionEvent.ACTION_UP -> if (swiping) {
+                swiping = false
+                val dx = ev.rawX - downX
+                if (abs(dx) > dp(80)) {
+                    date = if (dx < 0) date.plusDays(1) else date.minusDays(1)
+                    render()
+                    scroll.post { scroll.scrollTo(0, 0) }
+                }
+                return true
+            }
+            MotionEvent.ACTION_CANCEL -> swiping = false
+        }
+        if (swiping) return true
+        return super.dispatchTouchEvent(ev)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
